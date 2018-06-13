@@ -2,47 +2,70 @@ package client
 
 import (
 	"bittorrent/lib"
-	"bytes"
 	"crypto/sha1"
 	"errors"
+	"math/rand"
+	"net"
 	"os"
-
-	"github.com/jackpal/bencode-go"
+	"strconv"
+	"time"
 )
 
 var log = lib.Log
 
-func NewClient() BittorentClient {
-	return BittorentClient{}
-}
-
 type BittorentClient struct {
+	Id          []byte
+	Port        int
+	DownloadDir string
+	WillSeed    bool
+	Repository  TorrentRepository
+	Network     BittorentNetwork
 }
 
+func NewClient(downloadDir string, willSeed bool) BittorentClient {
+
+	network := BittorentNetwork{}
+	repo := NewRepository(downloadDir)
+
+	return BittorentClient{
+		Id:         generatePeerId(),
+		WillSeed:   willSeed,
+		Repository: repo,
+		Network:    network}
+}
+
+func (c *BittorentClient) HandlePeerRequest(conn net.Conn) {
+	defer conn.Close()
+}
+
+// Download begins downloading the given torrent
 func (c *BittorentClient) Download(torrentFile string) error {
 
-	log.Debugf("Opening %s", torrentFile)
-	file, err := os.Open(torrentFile)
+	torrent, err := NewTorrent(torrentFile)
 	if err != nil {
-		return errors.New("Failed to open torrent file: " + err.Error())
-	}
-	defer file.Close()
-
-	log.Debug("Decoding torrent file")
-	info := MetaInfo{}
-	err = bencode.Unmarshal(file, &info)
-	if err != nil {
-		return errors.New("Failed to decode torrent file: " + err.Error())
+		return errors.New("Failed to read torrent file: " + err.Error())
 	}
 
-	log.Debug("Computing torrent info hash")
-	infoHash, err := computeInfoHash(torrentFile)
+	// Open server
+	port, err := c.Network.Start(c.HandlePeerRequest)
 	if err != nil {
-		return errors.New("Failed to compute info hash: " + err.Error())
+		return errors.New("Failed to bind to port:\n" + err.Error())
 	}
 
-	log.Debugf("Announce URL: %s", info.Announce)
-	log.Debugf("Hash: %x", infoHash)
+	c.Port = port
+	c.Repository.AddFiles(torrent.Data.Info.Files)
+
+	// Announce to tracker
+	trackerData, ok := c.GetTrackerData(torrent)
+	if !ok {
+		return errors.New("Unable to find usable tracker")
+	}
+
+	log.Infof("Tracker data: %s", trackerData.TrackerId)
+
+	for _, peer := range trackerData.PeerList {
+		log.Infof("Peer: %s:%d", peer.Address, peer.Port)
+	}
 
 	return nil
 }
@@ -57,30 +80,58 @@ func (c *BittorentClient) Stop() {
 
 }
 
-func computeInfoHash(torrentPath string) ([]byte, error) {
+func (c *BittorentClient) GetTrackerData(torrent Torrent) (TrackerResponse, bool) {
 
-	file, err := os.Open(torrentPath)
-	if err != nil {
-		return nil, errors.New("Failed to open torrent: " + err.Error())
+	trackerRequest := c.getTrackerRequest(torrent)
+
+	// First check the announce list
+	if len(torrent.Data.AnnounceList) > 0 {
+		for _, tier := range torrent.Data.AnnounceList {
+			// Randomly select trackers from each tier
+			for _, index := range rand.Perm(len(tier)) {
+				tracker := Tracker{tier[index]}
+				log.Debugf("(%s) Announcing...", tracker.Url)
+				resp, err := tracker.Announce(trackerRequest)
+				if err == nil && len(resp.FailureReason) == 0 {
+					return resp, true
+				}
+
+				log.Debugf("(%s) Announce failed: .", tracker.Url)
+			}
+		}
 	}
 
-	data, err := bencode.Decode(file)
-	if err != nil {
-		return nil, errors.New("Failed to decode torrent file: " + err.Error())
+	// If no announce list tracker was successful,
+	// try using the top level announce
+	tracker := &Tracker{Url: torrent.Data.Announce}
+	log.Debugf("(%s) Announcing...", tracker.Url)
+	resp, err := tracker.Announce(trackerRequest)
+	if err == nil {
+		return resp, true
 	}
 
-	torrentDict, ok := data.(map[string]interface{})
-	if !ok {
-		return nil, errors.New("Torrent file is not a dictionary")
-	}
+	log.Debugf("(%s) Announce failed.", tracker.Url)
+	return TrackerResponse{}, false
+}
 
-	infoBuffer := bytes.Buffer{}
-	err = bencode.Marshal(&infoBuffer, torrentDict["info"])
-	if err != nil {
-		return nil, errors.New("Failed to encode info dict: " + err.Error())
-	}
+func (c *BittorentClient) getTrackerRequest(torrent Torrent) TrackerRequest {
+	return TrackerRequest{
+		InfoHash:   torrent.Hash,
+		PeerId:     c.Id,
+		Port:       c.Port,
+		Uploaded:   c.Repository.GetUploaded(),
+		Downloaded: c.Repository.GetDownloaded(),
+		Left:       c.Repository.GetLeft(),
+		Compact:    1, // Always go with compact
+		Event:      Started}
+}
 
+func generatePeerId() []byte {
 	hash := sha1.New()
-	hash.Write(infoBuffer.Bytes())
-	return hash.Sum(nil), nil
+	// Current time
+	hash.Write([]byte(strconv.FormatInt(time.Now().Unix(), 10)))
+	hash.Write([]byte(strconv.Itoa(os.Getpid())))
+
+	// Process ID
+	return hash.Sum(nil)
 }

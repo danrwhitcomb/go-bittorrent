@@ -14,30 +14,35 @@ func main() {
 	lib.ConfigureLogging(args.Verbose)
 	log.Infof("Starting download of torrent %s. Seeding: %t\n", args.Torrent, args.WillSeed)
 
-	client := client.NewClient()
+	client := client.NewClient(args.DownloadDir, args.WillSeed)
+
 	err := client.Download(args.Torrent)
 	if err != nil {
-		log.Error("Failed to download torrent: " + err.Error())
+		log.Fatal("Failed to bind client", err)
 	}
 }
 
+// Args hold command line arguments
 type Args struct {
-	Torrent  string
-	WillSeed bool
-	Verbose  bool
+	Torrent     string
+	DownloadDir string
+	WillSeed    bool
+	Verbose     bool
 }
 
+// ParseArgs manages command line arguments
 func ParseArgs() Args {
 	torrentOption := flag.String("f", "", "Torrent file to download (required)")
+	downloadPath := flag.String("d", "", "Directory will files will be downloaded (required). Directory will be created if it does not exist")
 	seedOption := flag.Bool("s", false, "Will seed if provided")
 	verbosityOption := flag.Bool("v", false, "Turns on debug logging")
 
 	flag.Parse()
 
-	if *torrentOption == "" {
+	if *torrentOption == "" || *downloadPath == "" {
 		flag.Usage()
 		os.Exit(1)
 	}
 
-	return Args{*torrentOption, *seedOption, *verbosityOption}
+	return Args{*torrentOption, *downloadPath, *seedOption, *verbosityOption}
 }
