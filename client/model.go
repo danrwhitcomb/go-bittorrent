@@ -59,9 +59,3 @@ type TrackerResponse struct {
 	PeerString     string `bencode:"peers"`
 	PeerList       []Peer `bencode:"peers"`
 }
-
-type Peer struct {
-	Id      string `bencode:"peer id"`
-	Address string `bencode:"ip"`
-	Port    int    `bencode:"port"`
-}

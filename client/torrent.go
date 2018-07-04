@@ -48,6 +48,7 @@ func computeInfoHash(torrentPath string) ([]byte, error) {
 	if err != nil {
 		return nil, errors.New("Failed to open torrent: " + err.Error())
 	}
+	defer file.Close()
 
 	data, err := bencode.Decode(file)
 	if err != nil {

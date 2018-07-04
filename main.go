@@ -1,9 +1,9 @@
 package main
 
 import (
-	"bittorrent/client"
-	"bittorrent/lib"
 	"flag"
+	"go-bittorrent/client"
+	"go-bittorrent/lib"
 	"os"
 )
 

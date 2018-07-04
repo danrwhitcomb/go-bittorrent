@@ -1,11 +1,10 @@
 package client
 
 import (
-	"bittorrent/lib"
 	"crypto/sha1"
 	"errors"
+	"go-bittorrent/lib"
 	"math/rand"
-	"net"
 	"os"
 	"strconv"
 	"time"
@@ -20,6 +19,9 @@ type BittorentClient struct {
 	WillSeed    bool
 	Repository  TorrentRepository
 	Network     BittorentNetwork
+
+	IsChoked    bool
+	Connections []Peer
 }
 
 func NewClient(downloadDir string, willSeed bool) BittorentClient {
@@ -34,10 +36,6 @@ func NewClient(downloadDir string, willSeed bool) BittorentClient {
 		Network:    network}
 }
 
-func (c *BittorentClient) HandlePeerRequest(conn net.Conn) {
-	defer conn.Close()
-}
-
 // Download begins downloading the given torrent
 func (c *BittorentClient) Download(torrentFile string) error {
 
@@ -47,7 +45,7 @@ func (c *BittorentClient) Download(torrentFile string) error {
 	}
 
 	// Open server
-	port, err := c.Network.Start(c.HandlePeerRequest)
+	port, err := c.Network.BindToPort(c.HandlePeerConnection)
 	if err != nil {
 		return errors.New("Failed to bind to port:\n" + err.Error())
 	}
@@ -64,7 +62,7 @@ func (c *BittorentClient) Download(torrentFile string) error {
 	log.Infof("Tracker data: %s", trackerData.TrackerId)
 
 	for _, peer := range trackerData.PeerList {
-		log.Infof("Peer: %s:%d", peer.Address, peer.Port)
+		log.Infof("Peer: %s", peer.Address.String())
 	}
 
 	return nil
@@ -77,7 +75,8 @@ func (c *BittorentClient) Status() bool {
 
 // Stops all current downloads
 func (c *BittorentClient) Stop() {
-
+	// Notify all clients of shutdown
+	// Shutdown server
 }
 
 func (c *BittorentClient) GetTrackerData(torrent Torrent) (TrackerResponse, bool) {
@@ -134,4 +133,8 @@ func generatePeerId() []byte {
 
 	// Process ID
 	return hash.Sum(nil)
+}
+
+func (c *BittorentClient) HandlePeerConnection(peer Peer) {
+	defer peer.Connection.Close()
 }

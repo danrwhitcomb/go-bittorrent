@@ -40,7 +40,7 @@ func (c *Tracker) Announce(request TrackerRequest) (TrackerResponse, error) {
 
 	result, err := http.Get(urlObj.String())
 	if err != nil || result.StatusCode < 200 || result.StatusCode >= 300 {
-		return TrackerResponse{}, errors.New("Tracker annouce failed")
+		return TrackerResponse{}, errors.New("Tracker announce failed")
 	}
 
 	var response TrackerResponse
@@ -63,13 +63,15 @@ func (c *Tracker) ParsePeers(peers string) ([]Peer, error) {
 		return nil, errors.New("Peer string length is not a multiple of 6")
 	}
 
-	peerList := make([]Peer, 0)
-	for i := 0; i < len(peers); i += 6 {
-		ipBytes := peers[i : i+6]
+	peerCount := len(peers) / 6
+	peerList := make([]Peer, peerCount)
+	for i := 0; i < peerCount; i++ {
+		ipBytes := peers[i*6 : (i*6)+6]
 		ip := net.IPv4(ipBytes[0], ipBytes[1], ipBytes[2], ipBytes[3])
-		peer := Peer{Address: ip.String(), Port: int(binary.BigEndian.Uint16([]byte(ipBytes[4:6])))}
+		port := int(binary.BigEndian.Uint16([]byte(ipBytes[4:6])))
+		peer := Peer{Address: net.TCPAddr{IP: ip, Port: port}}
 
-		peerList = append(peerList, peer)
+		peerList[i] = peer
 	}
 
 	return peerList, nil

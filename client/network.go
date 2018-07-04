@@ -3,21 +3,21 @@ package client
 import (
 	"errors"
 	"net"
-	"strconv"
 )
 
 type BittorentNetwork struct {
-	listener net.Listener
+	listener *net.TCPListener
 }
 
-// Start begins listening on a port and
+// BindToPort begins listening on a port and
 // returns the port it selected
-func (c *BittorentNetwork) Start(callback func(net.Conn)) (int, error) {
+func (c *BittorentNetwork) BindToPort(callback func(Peer)) (int, error) {
 
-	var port = -1
+	port := -1
 	for i := 6881; i < 6890; i++ {
 		log.Debug("Attempting to listen on %d", i)
-		listen, err := net.Listen("tcp", ":"+strconv.Itoa(i))
+		addr := net.TCPAddr{Port: i}
+		listen, err := net.ListenTCP("tcp", &addr)
 		if err == nil {
 			c.listener = listen
 			port = i
@@ -30,21 +30,22 @@ func (c *BittorentNetwork) Start(callback func(net.Conn)) (int, error) {
 	}
 
 	log.Infof("Listening on port %d", port)
-
 	go c.listenOnPort(callback)
 
 	return port, nil
 }
 
-func (c *BittorentNetwork) listenOnPort(callback func(net.Conn)) {
+func (c *BittorentNetwork) listenOnPort(callback func(Peer)) {
 	for {
-		conn, err := c.listener.Accept()
+		conn, err := c.listener.AcceptTCP()
 		if err != nil {
 			log.Error("Connection to client failed: ", err)
 			continue
 		}
 
-		go callback(conn)
+		addr, err := net.ResolveTCPAddr(conn.RemoteAddr().Network(), conn.RemoteAddr().String())
+		peer := Peer{Connection: conn, Address: *addr}
+		go callback(peer)
 	}
 }
 
